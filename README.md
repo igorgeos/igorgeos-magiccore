@@ -1,3 +1,1 @@
-# Magic Core
-
-Projeto Godot.
+test
