@@ -1,0 +1,3 @@
+# Magic Core
+
+Projeto Godot.
