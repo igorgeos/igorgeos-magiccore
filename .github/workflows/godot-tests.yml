@@ -1,9 +1,17 @@
-name: MAGIC CORE - Godot 4.7 Tests
+name: MAGIC CORE - Testar ZIP no Godot 4.7
 
 on:
   push:
     branches: [main, ci/magic-core-godot-tester]
+    paths:
+      - 'MAGIC_CORE_ATUAL.zip'
+      - '.github/workflows/godot-tests.yml'
+      - '.github/scripts/magic_core_ci.py'
   pull_request:
+    paths:
+      - 'MAGIC_CORE_ATUAL.zip'
+      - '.github/workflows/godot-tests.yml'
+      - '.github/scripts/magic_core_ci.py'
   workflow_dispatch:
 
 permissions:
@@ -11,92 +19,43 @@ permissions:
 
 jobs:
   godot-test:
+    name: Importar, executar, corrigir caminhos e retestar ZIP
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Download project from GitHub
+      - name: Baixar conteúdo do repositório
         uses: actions/checkout@v4
 
-      - name: Install Godot 4.7.2
+      - name: Instalar Godot 4.7.2
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.7.2
           use-dotnet: false
           include-templates: false
 
-      - name: Extract MAGIC CORE ZIP safely
+      - name: Testar ZIP do GitHub (com reteste)
+        id: check
         shell: bash
         run: |
-          python3 - <<'PY'
-          import os
-          import re
-          import stat
-          import zipfile
-          from pathlib import Path
+          python3 .github/scripts/magic_core_ci.py
 
-          def version_key(p):
-              return tuple(int(n) for n in re.findall(r"\d+", p.stem))
-          files = sorted(Path(".").glob("MAGIC_CORE_Godot_*.zip"), key=version_key)
-          if not files:
-              raise SystemExit("No MAGIC_CORE_Godot_*.zip found. Upload the project ZIP to the repository.")
-          archive = files[-1]
-          root = Path("ci-project").resolve()
-          root.mkdir(exist_ok=True)
-          with zipfile.ZipFile(archive) as z:
-              infos = z.infolist()
-              if len(infos) > 20000 or sum(i.file_size for i in infos) > 1500000000:
-                  raise SystemExit("ZIP is too large for safe CI extraction.")
-              for i in infos:
-                  p = (root / i.filename).resolve()
-                  if not p.is_relative_to(root) or (i.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
-                      raise SystemExit(f"Unsafe file path or symlink in ZIP: {i.filename}")
-              z.extractall(root)
-          projects = [p for p in root.rglob("project.godot") if ".godot" not in p.parts]
-          if len(projects) != 1:
-              raise SystemExit(f"Expected exactly one project.godot, found {len(projects)}.")
-          project = projects[0].parent
-          print(f"Selected ZIP: {archive}; Godot project: {project}")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf8") as output:
-              output.write(f"GODOT_PROJECT={project}\n")
-          PY
-
-      - name: Import resources and start game headlessly
-        shell: bash
-        run: |
-          mkdir -p test-logs
-          godot --version | tee test-logs/godot-version.txt
-          set +e
-          timeout 180s godot --headless --path "$GODOT_PROJECT" --import > test-logs/import.log 2>&1
-          import_status=$?
-          runtime_status=0
-          if grep -Eq '^[[:space:]]*run/main_scene[[:space:]]*=' "$GODOT_PROJECT/project.godot"; then
-            timeout 90s godot --headless --path "$GODOT_PROJECT" --fixed-fps 60 --quit-after 180 > test-logs/runtime.log 2>&1
-            runtime_status=$?
-          else
-            echo "No main scene configured; runtime smoke test skipped." > test-logs/runtime.log
-          fi
-          set -e
-          echo "### MAGIC CORE / Godot 4.7.2" | tee test-logs/summary.md
-          echo "ZIP project: $GODOT_PROJECT" | tee -a test-logs/summary.md
-          echo "Import exit: $import_status; runtime exit: $runtime_status" | tee -a test-logs/summary.md
-          echo "--- IMPORT LOG ---"
-          cat test-logs/import.log
-          echo "--- RUNTIME LOG ---"
-          cat test-logs/runtime.log
-          if [ "$import_status" -ne 0 ] || [ "$runtime_status" -ne 0 ]; then
-            echo "Godot returned a nonzero status." | tee -a test-logs/summary.md
-            exit 1
-          fi
-          if grep -Eiq 'SCRIPT ERROR|Parse Error|ERROR:|Failed to load|Cannot load|Invalid call' test-logs/import.log test-logs/runtime.log; then
-            echo "Godot reported an error; see logs." | tee -a test-logs/summary.md
-            exit 1
-          fi
-          echo "Headless import and startup checks passed; this does NOT verify visual animations or Android device behavior." | tee -a test-logs/summary.md
-
-      - name: Upload test logs
+      - name: Disponibilizar ZIP de saída
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: magic-core-godot-logs
-          path: test-logs/
+          name: magic-core-projeto-para-download
+          path: ci-output/*.zip
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Disponibilizar logs de diagnóstico
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: magic-core-resultado-testes
+          path: |
+            ci-output/results.json
+            ci-output/summary.txt
+            ci-output/logs/
+          if-no-files-found: warn
+          retention-days: 30
