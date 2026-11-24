@@ -1,0 +1,56 @@
+name: MAGIC CORE - Verificar executor Godot 4.7.2
+
+on:
+  push:
+    branches: [ci/magic-core-godot-tester, main]
+    paths:
+      - '.github/workflows/godot-runner-health.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  godot-real:
+    name: Executar Godot 4.7.2 real
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Executar script dentro do Godot
+        shell: bash
+        run: |
+          mkdir -p ci-probe ci-health
+          cat > ci-probe/project.godot <<'GODOT'
+          config_version=5
+
+          [application]
+          config/name="MAGIC CORE CI Probe"
+          GODOT
+          cat > ci-probe/probe.gd <<'GDS'
+          extends SceneTree
+
+          func _initialize() -> void:
+              var version := str(Engine.get_version_info().get("string", "unknown"))
+              print("MAGIC_CORE_GODOT_ENGINE_RUNNING: " + version)
+              quit(0)
+          GDS
+          set -o pipefail
+          godot --version | tee ci-health/godot-version.txt
+          timeout 45s godot --headless --path ci-probe --import 2>&1 | tee ci-health/import.log
+          timeout 45s godot --headless --path ci-probe --script res://probe.gd 2>&1 | tee ci-health/godot-executed.log
+          grep -q 'MAGIC_CORE_GODOT_ENGINE_RUNNING: 4.7.2' ci-health/godot-executed.log
+      - name: Disponibilizar prova de execução
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-4-7-2-executor-comprovacao
+          path: ci-health/
+          if-no-files-found: warn
+          retention-days: 30
